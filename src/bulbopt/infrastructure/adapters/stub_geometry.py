@@ -159,6 +159,18 @@ class StubGeometryAdapter:
         region_depth = max(float(extents[primary_axis]) * 0.15, 1e-6)
         auto_axis_min = axis_max - region_depth
 
+        # Detect beam (port-starboard) and draft (keel-to-deck) axes from
+        # the actual mesh symmetry rather than blindly picking
+        # other_axes[0] / argmin(extents). On real ship hulls (e.g.
+        # docs/base_hull.stl) the asymmetric draft axis can be Y while
+        # the symmetric beam axis is Z, with Y also having the smaller
+        # extent — so both old heuristics picked the wrong axis.
+        # Audit 2026-04-26 found this was the dominant root cause of the
+        # "wrong-axis" deformations seen in the night-run outputs.
+        beam_axis, draft_axis = _detect_beam_and_draft_axes(
+            mesh.vertices, primary_axis=primary_axis
+        )
+
         # Apply user override while preserving the auto-detected value for the
         # report (spec §11.2 + §14 engineering-honest reporting).
         confirmed_axis_min = auto_axis_min
@@ -203,6 +215,8 @@ class StubGeometryAdapter:
             "repaired_path": str(repaired_path),
             "bulb_region": {
                 "axis_index": primary_axis,
+                "beam_axis": int(beam_axis),
+                "draft_axis": int(draft_axis),
                 "axis_min": confirmed_axis_min,
                 "axis_max": confirmed_axis_max,
                 "mask_ratio": mask_ratio,
@@ -290,3 +304,82 @@ class StubGeometryAdapter:
         current_payload = self._json_store.read(artifacts_path)
         current_payload.update(payload)
         self._json_store.write(artifacts_path, current_payload)
+
+
+def _detect_beam_and_draft_axes(
+    vertices: np.ndarray, *, primary_axis: int
+) -> tuple[int, int]:
+    """Return (beam_axis, draft_axis) from the two non-primary axes.
+
+    The **beam axis** of a ship hull is the port-starboard axis: vertices
+    are mirror-symmetric around its midplane (centerline). The **draft
+    axis** is keel-to-deck: vertices typically run from a keel deep
+    below the waterline up to a deck well above it, so the centroid
+    sits well above zero.
+
+    Detection rule (audit 2026-04-26):
+
+    1. For each non-primary axis compute ``|center| / spread`` where
+       ``center = (min + max) / 2`` and ``spread = max - min``.
+       The most-symmetric axis (smallest ratio) is the beam axis. The
+       other non-primary axis is the draft axis.
+
+    2. Tie-break (within 5% of the smallest ratio): pick the axis whose
+       vertex distribution has the **lower kurtosis** around 0 — a
+       uniformly mirrored beam distribution has kurtosis closer to 0,
+       while a draft distribution skewed off zero has higher kurtosis.
+
+    Falls back to ``other_axes[0]`` if the mesh is degenerate (zero
+    extent on a non-primary axis).
+    """
+    other_axes = [a for a in range(3) if a != primary_axis]
+    if len(other_axes) != 2:
+        # Defensive: shouldn't happen for a 3-D mesh.
+        return other_axes[0], other_axes[-1]
+
+    ratios = []
+    for axis in other_axes:
+        coords = np.asarray(vertices[:, axis], dtype=float)
+        lo = float(coords.min())
+        hi = float(coords.max())
+        spread = hi - lo
+        if spread <= 0:
+            ratios.append(float("inf"))
+            continue
+        center = 0.5 * (lo + hi)
+        ratios.append(abs(center) / spread)
+
+    if not np.isfinite(ratios[0]) and not np.isfinite(ratios[1]):
+        return other_axes[0], other_axes[1]
+    if not np.isfinite(ratios[0]):
+        return other_axes[1], other_axes[0]
+    if not np.isfinite(ratios[1]):
+        return other_axes[0], other_axes[1]
+
+    smaller = min(ratios)
+    # Tie-break threshold: 5% of the smaller ratio (or 0.01 absolute,
+    # whichever is larger, so the rule kicks in even for symmetric meshes
+    # where both ratios are near zero).
+    tolerance = max(0.05 * smaller, 0.01)
+    if abs(ratios[0] - ratios[1]) <= tolerance:
+        # Use kurtosis-around-0 tie-break: prefer the axis whose vertex
+        # distribution is more uniformly mirrored. Lower kurtosis around
+        # zero → more spread out, more likely the symmetric beam axis.
+        kurts = []
+        for axis in other_axes:
+            coords = np.asarray(vertices[:, axis], dtype=float)
+            sigma = float(np.std(coords))
+            if sigma <= 0:
+                kurts.append(float("inf"))
+                continue
+            # Standardised 4th central moment around 0 (not around mean)
+            # — this directly measures how clustered the values are
+            # near zero. A symmetric beam distribution has lower values.
+            kurts.append(float(np.mean((coords / sigma) ** 4)))
+        if kurts[0] <= kurts[1]:
+            return other_axes[0], other_axes[1]
+        return other_axes[1], other_axes[0]
+
+    if ratios[0] <= ratios[1]:
+        return other_axes[0], other_axes[1]
+    return other_axes[1], other_axes[0]

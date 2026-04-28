@@ -1,0 +1,8 @@
+{
+  "checks_passed": true,
+  "face_count": 29256,
+  "vertex_count": 14630,
+  "volume": 83453.82252262853,
+  "watertight": true,
+  "winding_consistent": true
+}

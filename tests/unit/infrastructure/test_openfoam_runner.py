@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from bulbopt.execution.checkpoints.file_checkpoint_store import FileCheckpointStore
 from bulbopt.execution.worker.local_worker import LocalWorker
 from bulbopt.infrastructure.adapters.openfoam_adapter import OpenFOAMAdapter
@@ -323,6 +325,70 @@ def test_openfoam_runner_includes_simple_foam_in_default_solver_chain(
     assert any("simplefoam" in c for c in commands_lower)
 
 
+def test_openfoam_runner_records_simple_foam_convergence_evidence(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The run manifest should expose whether simpleFoam produced residuals
+    and reached ``End`` so CFD evidence can distinguish a completed solve from
+    a merely successful subprocess."""
+    import subprocess as subprocess_module
+
+    case_dir = tmp_path / "case-convergence"
+    geometry_path = case_dir / "candidate.stl"
+    geometry_path.parent.mkdir(parents=True, exist_ok=True)
+    geometry_path.write_text("solid demo\nendsolid demo\n", encoding="utf-8")
+
+    builder = OpenFOAMAdapter()
+    monkeypatch.setattr(builder, "is_available", lambda: True)
+    manifest = builder.build_case(
+        case_dir,
+        best_candidate_id="candidate-conv",
+        best_candidate_geometry_path=geometry_path,
+    )
+
+    runner = OpenFOAMRunnerAdapter()
+    monkeypatch.setattr(runner, "is_available", lambda: True)
+
+    class _FakeProc:
+        def __init__(self, args, rc=0, stdout="", stderr=""):
+            self.args, self.returncode, self.stdout, self.stderr = args, rc, stdout, stderr
+
+    simple_log = (
+        "Time = 200\n"
+        "smoothSolver:  Solving for Ux, Initial residual = 1e-04, Final residual = 1e-06, No Iterations 2\n"
+        "GAMG:  Solving for p, Initial residual = 2e-04, Final residual = 2e-06, No Iterations 3\n"
+        "End\n"
+    )
+
+    def fake_run(args, **kwargs):
+        solver = args[0].lower()
+        if "checkmesh" in solver:
+            return _FakeProc(args, 0, stdout="Mesh OK.\n")
+        if "simplefoam" in solver:
+            return _FakeProc(args, 0, stdout=simple_log)
+        return _FakeProc(args, 0, stdout="ok\n")
+
+    monkeypatch.setattr(subprocess_module, "run", fake_run)
+
+    result = runner.run_case(
+        case_dir / "working" / "openfoam_case",
+        case_manifest=manifest,
+        execute=True,
+    )
+
+    simple_step = next(
+        step
+        for step in result["executed_steps"]
+        if step["command"][0] == "simpleFoam"
+    )
+    report = simple_step["solver_report"]
+    assert report["residuals_available"] is True
+    assert report["completed"] is True
+    assert report["last_time"] == pytest.approx(200.0)
+    assert report["residual_equations"] == ["Ux", "p"]
+
+
 def test_openfoam_runner_executes_solver_chain_when_available(
     tmp_path: Path,
     monkeypatch,
@@ -464,6 +530,135 @@ def test_openfoam_runner_returns_recoverable_skip_when_solver_is_unavailable(
     assert result["reason"] == "openfoam_unavailable"
     assert result["is_recoverable"] is True
     assert (case_dir / "working" / "openfoam_case" / "openfoam_run_manifest.json").exists()
+
+
+def test_openfoam_runner_fails_early_when_checkmesh_reports_illegal_cells(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """mesh-quality design §4 Part B: checkMesh sits between
+    snappyHexMesh and simpleFoam; a positive illegal-cell count must
+    stop the chain with ``executed_failed`` (reason pointing at checkMesh)
+    before the expensive simpleFoam solve burns any CPU."""
+    import subprocess as subprocess_module
+
+    case_dir = tmp_path / "case-check"
+    geometry_path = case_dir / "candidate.stl"
+    geometry_path.parent.mkdir(parents=True, exist_ok=True)
+    geometry_path.write_text("solid demo\nendsolid demo\n", encoding="utf-8")
+
+    builder = OpenFOAMAdapter()
+    monkeypatch.setattr(builder, "is_available", lambda: True)
+    manifest = builder.build_case(
+        case_dir,
+        best_candidate_id="candidate-bad-mesh",
+        best_candidate_geometry_path=geometry_path,
+    )
+
+    runner = OpenFOAMRunnerAdapter()
+    monkeypatch.setattr(runner, "is_available", lambda: True)
+
+    bad_check_log = (
+        "Max non-orthogonality = 88.4\n"
+        "Max skewness = 9.1\n"
+        "Max aspect ratio = 240.1\n"
+        "***Number of cells with incorrect orientation: 4\n"
+        "cells with zero or negative volume: 1\n"
+        "Failed 2 mesh checks.\n"
+    )
+
+    class _FakeProc:
+        def __init__(self, args, rc, stdout="", stderr=""):
+            self.args, self.returncode, self.stdout, self.stderr = args, rc, stdout, stderr
+
+    invocations: list[str] = []
+
+    def fake_run(args, **kwargs):
+        solver = args[0].lower()
+        invocations.append(solver)
+        if "checkmesh" in solver:
+            # checkMesh typically returns 0 even when illegal cells exist;
+            # the parser-based gate is what stops the chain.
+            return _FakeProc(args, 0, stdout=bad_check_log)
+        return _FakeProc(args, 0, stdout="ok\n")
+
+    monkeypatch.setattr(subprocess_module, "run", fake_run)
+
+    result = runner.run_case(
+        case_dir / "working" / "openfoam_case",
+        case_manifest=manifest,
+        execute=True,
+    )
+
+    assert result["status"] == "executed_failed"
+    assert "checkMesh" in result["reason"]
+    # simpleFoam must NOT have been invoked: we bail after checkMesh.
+    assert not any("simplefoam" in cmd for cmd in invocations)
+    # The check_mesh_report rides in the executed_steps entry for the
+    # checkMesh step so downstream reporting can surface the metrics.
+    check_step = next(
+        (step for step in result["executed_steps"]
+         if step["command"][0] == "checkMesh"),
+        None,
+    )
+    assert check_step is not None
+    assert check_step["check_mesh_report"]["n_illegal_cells"] == 5
+    assert check_step["check_mesh_report"]["max_skewness"] == pytest.approx(9.1)
+
+
+def test_openfoam_runner_continues_when_checkmesh_reports_clean(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A clean checkMesh (no illegal cells) must let simpleFoam run."""
+    import subprocess as subprocess_module
+
+    case_dir = tmp_path / "case-clean"
+    geometry_path = case_dir / "candidate.stl"
+    geometry_path.parent.mkdir(parents=True, exist_ok=True)
+    geometry_path.write_text("solid demo\nendsolid demo\n", encoding="utf-8")
+
+    builder = OpenFOAMAdapter()
+    monkeypatch.setattr(builder, "is_available", lambda: True)
+    manifest = builder.build_case(
+        case_dir,
+        best_candidate_id="candidate-clean-mesh",
+        best_candidate_geometry_path=geometry_path,
+    )
+
+    runner = OpenFOAMRunnerAdapter()
+    monkeypatch.setattr(runner, "is_available", lambda: True)
+
+    clean_check_log = (
+        "Max non-orthogonality = 42.0\n"
+        "Max skewness = 1.7\n"
+        "Max aspect ratio = 4.8\n"
+        "Mesh OK.\n"
+    )
+
+    class _FakeProc:
+        def __init__(self, args, rc, stdout="", stderr=""):
+            self.args, self.returncode, self.stdout, self.stderr = args, rc, stdout, stderr
+
+    invocations: list[str] = []
+
+    def fake_run(args, **kwargs):
+        solver = args[0].lower()
+        invocations.append(solver)
+        if "checkmesh" in solver:
+            return _FakeProc(args, 0, stdout=clean_check_log)
+        return _FakeProc(args, 0, stdout="ok\n")
+
+    monkeypatch.setattr(subprocess_module, "run", fake_run)
+
+    result = runner.run_case(
+        case_dir / "working" / "openfoam_case",
+        case_manifest=manifest,
+        execute=True,
+    )
+
+    assert result["status"] == "executed_ok"
+    assert any("simplefoam" in cmd for cmd in invocations)
 
 
 def test_openfoam_runner_can_be_executed_through_local_worker(tmp_path: Path, monkeypatch) -> None:

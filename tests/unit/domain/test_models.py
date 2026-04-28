@@ -60,3 +60,23 @@ def test_candidate_variant_tracks_retry_metadata() -> None:
     assert candidate.retry_count == 0
     assert candidate.can_retry is True
     assert candidate.error_code is None
+
+
+def test_case_status_includes_running_night_optimization_and_verification() -> None:
+    """Spec §10.1 introduces two new lifecycle states for the night-run flow.
+
+    The audit (2026-04-26) found that ``bulbopt list`` cannot tell a failed
+    night run apart from a legacy slice run because the case never enters
+    a "night" state — it just transitions through the generic
+    ``RUNNING_*`` trio. Adding these two values closes that gap.
+
+    These additions must be backward-compatible: the old states stay.
+    """
+    assert hasattr(CaseStatus, 'RUNNING_NIGHT_OPTIMIZATION')
+    assert hasattr(CaseStatus, 'RUNNING_VERIFICATION')
+    assert CaseStatus.RUNNING_NIGHT_OPTIMIZATION.value == 'running_night_optimization'
+    assert CaseStatus.RUNNING_VERIFICATION.value == 'running_verification'
+    # Backward compatibility: legacy slice states remain.
+    assert CaseStatus.RUNNING_FAST_SCREENING.value == 'running_fast_screening'
+    assert CaseStatus.RUNNING_MID_FIDELITY.value == 'running_mid_fidelity'
+    assert CaseStatus.RUNNING_HIGH_FIDELITY.value == 'running_high_fidelity'

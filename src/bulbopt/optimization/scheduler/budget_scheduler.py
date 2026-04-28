@@ -36,6 +36,12 @@ class BudgetScheduler:
     _total_seconds: float = field(default=0.0, init=False)
     _last_clock_tick: Optional[float] = field(default=None, init=False)
 
+    def __post_init__(self) -> None:
+        # ``init=False`` fields with ``default=...`` are not assigned on
+        # instances when ``slots=True`` is enabled, so seed them here.
+        self._total_seconds = 0.0
+        self._last_clock_tick = None
+
     @property
     def runtime_budget_seconds(self) -> float:
         return float(self.runtime_budget_hours) * 3600.0

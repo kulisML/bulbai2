@@ -1,0 +1,9 @@
+{"timestamp": "2026-04-24T05:45:35+00:00", "stage": "pipeline", "status": "started", "case_id": "case-c8eccb64", "mode": "night_optimization"}
+{"timestamp": "2026-04-24T05:45:35+00:00", "stage": "prepare_geometry", "status": "started"}
+{"timestamp": "2026-04-24T05:45:39+00:00", "stage": "prepare_geometry", "status": "completed"}
+{"timestamp": "2026-04-24T05:45:39+00:00", "stage": "night_optimization", "status": "started"}
+{"timestamp": "2026-04-24T05:45:44+00:00", "stage": "high_gate", "status": "initialised", "backend": "simple_foam"}
+{"timestamp": "2026-04-24T06:00:16+00:00", "stage": "night_optimization", "status": "completed", "pareto_candidates": 50, "high_fidelity_candidates": 10, "budget_exhausted": false}
+{"timestamp": "2026-04-24T06:00:19+00:00", "stage": "night_optimization_outputs", "status": "completed", "winner": "candidate-001", "stl_invalid_count": 0}
+{"timestamp": "2026-04-24T06:00:24+00:00", "stage": "build_night_report", "status": "completed", "path": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8eccb64\\outputs\\reports\\night_report.html"}
+{"timestamp": "2026-04-24T06:00:24+00:00", "stage": "pipeline", "status": "completed", "winner": "candidate-001"}

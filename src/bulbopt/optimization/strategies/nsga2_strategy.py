@@ -41,6 +41,39 @@ from bulbopt.optimization.parametric.kracht_space import (
 )
 
 
+def _build_initial_sampling(
+    space: KrachtDesignSpace,
+    warm_start_vectors: Sequence[KrachtVector],
+    population: int,
+):
+    """Build a pymoo sampling array seeded with ``warm_start_vectors``.
+
+    The returned 2-D ``(population, n_var)`` array is passed as the
+    ``sampling`` argument to pymoo's NSGA2 — pymoo accepts a raw ndarray
+    and uses its rows as the initial population.
+
+    Remaining rows (after the warm-start points) are filled with uniform
+    random samples inside the KrachtDesignSpace bounds. If more
+    warm-start vectors are supplied than the population size, the first
+    ``population`` are used and the rest dropped.
+    """
+    rng = np.random.default_rng(0)
+    xl = np.array([space.bounds[name][0] for name in KRACHT_PARAMETER_NAMES])
+    xu = np.array([space.bounds[name][1] for name in KRACHT_PARAMETER_NAMES])
+    rows: list[np.ndarray] = []
+    for vector in warm_start_vectors[:population]:
+        row = np.array(
+            [float(vector.values[name]) for name in KRACHT_PARAMETER_NAMES],
+            dtype=float,
+        )
+        # Clamp to bounds so pymoo doesn't reject the sample.
+        row = np.minimum(np.maximum(row, xl), xu)
+        rows.append(row)
+    while len(rows) < population:
+        rows.append(xl + rng.random(len(xl)) * (xu - xl))
+    return np.asarray(rows, dtype=float)
+
+
 EvaluateFn = Callable[[List[KrachtVector]], List[List[float]]]
 
 
@@ -57,6 +90,15 @@ class ParetoFront:
     """Final output of :meth:`NSGA2Strategy.optimize`."""
 
     candidates: List[ParetoCandidate]
+
+
+# Per-generation snapshot callback (spec 2026-04-22 §10.2). Default ``None``
+# keeps the surface backward-compatible: tests that don't need snapshots
+# (the bi-objective unit tests) skip the extra plumbing entirely.
+GenerationSnapshotFn = Callable[
+    [int, List[KrachtVector], List[List[float]], List[ParetoCandidate]],
+    None,
+]
 
 
 class NSGA2Strategy:
@@ -83,6 +125,8 @@ class NSGA2Strategy:
         seed: int | None = None,
         on_generation: Callable[[Mapping[str, int]], None] | None = None,
         n_objectives: int = 2,
+        warm_start_vectors: Sequence[KrachtVector] | None = None,
+        on_generation_snapshot: GenerationSnapshotFn | None = None,
     ) -> None:
         if population < 2:
             raise ValueError("population must be >= 2")
@@ -95,6 +139,14 @@ class NSGA2Strategy:
         self.seed = seed
         self.on_generation = on_generation
         self.n_objectives = int(n_objectives)
+        self.warm_start_vectors: List[KrachtVector] = (
+            list(warm_start_vectors) if warm_start_vectors else []
+        )
+        # Per-generation snapshot callback (spec 2026-04-22 §10.2). Fires
+        # once per generation with ``(generation_index, population,
+        # objectives, pareto)`` so the use case can persist gen-NN
+        # directories. Default ``None`` keeps the existing tests green.
+        self.on_generation_snapshot = on_generation_snapshot
 
     def optimize(
         self,
@@ -107,9 +159,17 @@ class NSGA2Strategy:
             evaluate=evaluate,
             n_objectives=self.n_objectives,
         )
+        if self.warm_start_vectors:
+            sampling = _build_initial_sampling(
+                space=space,
+                warm_start_vectors=self.warm_start_vectors,
+                population=self.population,
+            )
+        else:
+            sampling = FloatRandomSampling()
         algo = NSGA2(
             pop_size=self.population,
-            sampling=FloatRandomSampling(),
+            sampling=sampling,
         )
         callback = _GenerationCallback(
             strategy=self,
@@ -167,9 +227,26 @@ class _KrachtProblem(Problem):
 
 
 class _GenerationCallback(Callback):
-    """Per-generation pymoo callback that fans out to user on_generation."""
+    """Per-generation pymoo callback that fans out to user callbacks.
 
-    def __init__(self, *, strategy: NSGA2Strategy, problem: Problem) -> None:
+    Two independent fan-outs:
+
+    * ``on_generation`` (legacy) — receives a flat ``{generation,
+      evaluations, non_dominated_count}`` dict for UI progress bars.
+    * ``on_generation_snapshot`` (spec 2026-04-22 §10.2) — receives the
+      full population + objectives matrix + current Pareto front so the
+      caller can write ``working/night_optimization/generations/gen-NN/``
+      directories. We translate pymoo's raw arrays back into
+      :class:`KrachtVector` and :class:`ParetoCandidate` here so callers
+      never see pymoo internals.
+    """
+
+    def __init__(
+        self,
+        *,
+        strategy: NSGA2Strategy,
+        problem: "_KrachtProblem",
+    ) -> None:
         super().__init__()
         self._strategy = strategy
         self._problem = problem
@@ -181,17 +258,67 @@ class _GenerationCallback(Callback):
         if pop is None:
             return
         self._evaluations_so_far += len(pop)
-        cb = self._strategy.on_generation
-        if cb is None:
-            self._generation_index += 1
-            return
+
+        snapshot_cb = self._strategy.on_generation_snapshot
+        legacy_cb = self._strategy.on_generation
+
         opt = algorithm.opt
         non_dominated_count = 0 if opt is None else len(opt)
-        cb(
-            {
-                "generation": self._generation_index,
-                "evaluations": self._evaluations_so_far,
-                "non_dominated_count": non_dominated_count,
-            }
-        )
+
+        if snapshot_cb is not None:
+            try:
+                population_vectors, objectives_rows = self._extract_population(pop)
+                pareto_candidates = self._extract_pareto(opt)
+                snapshot_cb(
+                    self._generation_index,
+                    population_vectors,
+                    objectives_rows,
+                    pareto_candidates,
+                )
+            except Exception:
+                # The snapshot writer is the caller's; never let a
+                # serialisation/disk error abort the optimisation. The
+                # caller is expected to log the failure itself.
+                pass
+
+        if legacy_cb is not None:
+            legacy_cb(
+                {
+                    "generation": self._generation_index,
+                    "evaluations": self._evaluations_so_far,
+                    "non_dominated_count": non_dominated_count,
+                }
+            )
         self._generation_index += 1
+
+    # ---- helpers ---------------------------------------------------------
+
+    def _extract_population(
+        self, pop
+    ) -> tuple[List[KrachtVector], List[List[float]]]:
+        X = np.atleast_2d(pop.get("X"))
+        F_raw = pop.get("F")
+        F = np.atleast_2d(F_raw) if F_raw is not None else np.zeros((len(X), 0))
+        space = self._problem._space
+        vectors = [
+            space.from_array([float(v) for v in row]) for row in X
+        ]
+        objectives = [[float(value) for value in row] for row in F]
+        return vectors, objectives
+
+    def _extract_pareto(self, opt) -> List[ParetoCandidate]:
+        if opt is None:
+            return []
+        X = np.atleast_2d(opt.get("X"))
+        F_raw = opt.get("F")
+        F = np.atleast_2d(F_raw) if F_raw is not None else np.zeros((len(X), 0))
+        space = self._problem._space
+        candidates: List[ParetoCandidate] = []
+        for row, objectives in zip(X, F):
+            candidates.append(
+                ParetoCandidate(
+                    vector=space.from_array([float(v) for v in row]),
+                    objectives=[float(value) for value in objectives],
+                )
+            )
+        return candidates

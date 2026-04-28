@@ -47,6 +47,61 @@ def test_parser_reads_last_drag_coefficient(tmp_path: Path) -> None:
     assert result["final_time"] == pytest.approx(10.0)
 
 
+def test_parser_reads_openfoam13_force_coeffs_dat_cd_column(tmp_path: Path) -> None:
+    dat = tmp_path / "forceCoeffs.dat"
+    dat.write_text(
+        "# Force coefficients\n"
+        "# Time Cm Cd Cl Cl(f) Cl(r)\n"
+        "0 0.001 0.410000 0.0 0.0 0.0\n"
+        "200 0.002 0.324057128630 0.0 0.0 0.0\n",
+        encoding="utf-8",
+    )
+
+    result = parse_drag_coefficient_dat(dat)
+
+    assert result["final_cd"] == pytest.approx(0.324057128630)
+    assert result["source_format"] == "openfoam13_forceCoeffs"
+
+
+def test_parser_reports_stable_final_cd_window(tmp_path: Path) -> None:
+    dat = tmp_path / "forceCoeffs.dat"
+    dat.write_text(
+        "# Time Cm Cd Cl Cl(f) Cl(r)\n"
+        "0 0.0 0.5000 0 0 0\n"
+        "100 0.0 0.3260 0 0 0\n"
+        "200 0.0 0.3250 0 0 0\n"
+        "300 0.0 0.3245 0 0 0\n"
+        "400 0.0 0.3244 0 0 0\n",
+        encoding="utf-8",
+    )
+
+    result = parse_drag_coefficient_dat(dat)
+
+    assert result["cd_stability"]["stable"] is True
+    assert result["cd_stability"]["window_size"] == 4
+    assert result["cd_stability"]["max_delta"] == pytest.approx(0.0016)
+    assert result["solver_convergence"]["status"] == "cd_stable"
+
+
+def test_parser_reports_unstable_final_cd_window(tmp_path: Path) -> None:
+    dat = tmp_path / "forceCoeffs.dat"
+    dat.write_text(
+        "# Time Cm Cd Cl Cl(f) Cl(r)\n"
+        "0 0.0 0.5000 0 0 0\n"
+        "100 0.0 0.3300 0 0 0\n"
+        "200 0.0 0.3000 0 0 0\n"
+        "300 0.0 0.3600 0 0 0\n"
+        "400 0.0 0.3240 0 0 0\n",
+        encoding="utf-8",
+    )
+
+    result = parse_drag_coefficient_dat(dat)
+
+    assert result["cd_stability"]["stable"] is False
+    assert result["cd_stability"]["max_delta"] == pytest.approx(0.06)
+    assert result["solver_convergence"]["status"] == "cd_unstable"
+
+
 def test_parser_ignores_comments_and_blank_lines(tmp_path: Path) -> None:
     dat = tmp_path / "coefficient.dat"
     dat.write_text(

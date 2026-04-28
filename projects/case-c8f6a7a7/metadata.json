@@ -1,0 +1,40 @@
+{
+  "create_case_command": {
+    "case_name": "full-night-wsl-20260424-091347",
+    "source_path": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\docs\\base_hull.stl",
+    "vessel_length_m": 142.0,
+    "vessel_beam_m": 19.1,
+    "vessel_draft_m": 6.0,
+    "displacement_t": 8420.0,
+    "speed_knots": [
+      18.0,
+      20.0
+    ],
+    "operational_profile_weights": null,
+    "wave_height_m": 0.0,
+    "wave_period_s": 0.0,
+    "wave_scenario_heights_m": null,
+    "wave_scenario_periods_s": null,
+    "wave_scenario_weights": null,
+    "calm_water_condition_weight": 0.7,
+    "wave_condition_weight": 0.3,
+    "import_format": "stl",
+    "optimization_mode": "generate_new_bulb",
+    "runtime_budget_hours": 8,
+    "candidate_count": 3,
+    "resistance_weight": 1.0,
+    "axial_gain_weight": 0.8,
+    "draft_reduction_weight": 0.1,
+    "beam_growth_weight": 0.05,
+    "max_volume_delta_pct": 4.5,
+    "max_draft_delta_m": 0.05,
+    "max_speed_balance_ratio": 4.0,
+    "max_wave_penalty": 1.5,
+    "reject_volume_delta_pct": 9.0,
+    "reject_draft_delta_m": 0.1,
+    "reject_speed_balance_ratio": 8.0,
+    "reject_wave_penalty": 3.0,
+    "bulb_region_axis_min_override": null,
+    "bulb_region_axis_max_override": null
+  }
+}

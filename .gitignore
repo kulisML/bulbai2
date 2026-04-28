@@ -16,5 +16,11 @@ OpenFOAM-v*/
 # Local experiments / manual runs
 foam_projects/
 foam_test_projects/
+night_projects/
+projects/case-*/
+projects/.history/
+mesh_quality_snapshots/
 bm-out.txt
 bm-err.txt
+# Agent worktree directories (keep branch metadata only)
+worktree-*/

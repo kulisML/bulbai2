@@ -1,0 +1,17 @@
+{
+  "adapter": "openfoam",
+  "available": true,
+  "used": false,
+  "mode": "optional",
+  "runtime_backend": "wsl",
+  "wsl_distro": "Ubuntu-22.04",
+  "wsl_bashrc": "/opt/openfoam13/etc/bashrc",
+  "case_built": true,
+  "best_candidate_id": "candidate-926a140f",
+  "case_directory": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8eccb64\\working\\night_optimization\\foam_candidates\\candidate-926a140f\\working\\openfoam_case",
+  "geometry_path": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8eccb64\\working\\night_optimization\\foam_candidates\\candidate-926a140f\\working\\openfoam_case\\constant\\triSurface\\best_candidate.stl",
+  "mesh_templates": [
+    "blockMeshDict",
+    "snappyHexMeshDict"
+  ]
+}

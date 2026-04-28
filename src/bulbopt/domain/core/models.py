@@ -17,6 +17,15 @@ class CaseStatus(str, Enum):
     RUNNING_FAST_SCREENING = 'running_fast_screening'
     RUNNING_MID_FIDELITY = 'running_mid_fidelity'
     RUNNING_HIGH_FIDELITY = 'running_high_fidelity'
+    # Night-run lifecycle states (spec 2026-04-22 §10.1). Additions, not
+    # replacements: the legacy slice states above stay untouched so
+    # ``bulbopt list`` and ``bulbopt resume`` keep their semantics. The
+    # two new states let the night flow distinguish itself from the
+    # vertical slice — without them a failed night run persists as
+    # ``FAILED`` or ``RUNNING_HIGH_FIDELITY`` and looks identical to a
+    # legacy run.
+    RUNNING_NIGHT_OPTIMIZATION = 'running_night_optimization'
+    RUNNING_VERIFICATION = 'running_verification'
     ASSEMBLING_RESULTS = 'assembling_results'
     COMPLETED = 'completed'
     COMPLETED_WITH_WARNINGS = 'completed_with_warnings'

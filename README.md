@@ -80,9 +80,39 @@ python -m bulbopt.app.main list --project ./projects
 
 # Resume a recoverable case
 python -m bulbopt.app.main resume --project ./projects --case case-abc12345
+
+# Run a full night optimization
+python -m bulbopt.app.main night-run \
+  --source docs/base_hull.stl \
+  --project ./projects \
+  --case-name dtmb-night \
+  --budget-hours 8 \
+  --population 50 \
+  --generations 20 \
+  --high-fidelity-budget 10
+
+# Inspect compatible CFD evidence before reusing warm-start / surrogate data
+python -m bulbopt.app.main evidence \
+  --project ./projects \
+  --source docs/base_hull.stl \
+  --backend external \
+  --limit 10
+
+# Machine-readable readiness gate for scripts / CI
+python -m bulbopt.app.main evidence \
+  --project ./projects \
+  --source docs/base_hull.stl \
+  --backend external \
+  --json \
+  --min-eligible 5
 ```
 
-Exit codes: `0` on success, `1` on pipeline failure, `2` on usage error.
+Exit codes: `0` on success, `1` on pipeline failure or failed readiness gate,
+`2` on usage error.
+
+The `evidence` command filters historical CFD rows by source-hull fingerprint
+and solver-settings hash. Only compatible, engineering-valid, improving rows
+are eligible for safe warm-start and surrogate training.
 
 ## Case folder layout
 

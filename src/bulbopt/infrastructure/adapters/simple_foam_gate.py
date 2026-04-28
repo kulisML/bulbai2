@@ -37,8 +37,9 @@ from bulbopt.infrastructure.adapters.force_coeffs_parser import (
     ForceCoeffsNotFoundError,
     parse_drag_coefficient_dat,
 )
+from bulbopt.infrastructure.adapters.stl_sanity import validate_stl
 from bulbopt.optimization.parametric.ffd_deformer import BulbFFDDeformer
-from bulbopt.optimization.parametric.kracht_space import KrachtVector
+from bulbopt.optimization.parametric.kracht_space import KrachtDesignSpace, KrachtVector
 
 
 BuildCaseFn = Callable[..., dict]
@@ -59,23 +60,130 @@ class SimpleFoamHighFidelityGate:
     reference_velocity_m_s: float | None = None
     reference_area_m2: float | None = None
     fluid_density_kg_m3: float | None = None
+    evaluation_records: list[dict] = field(init=False, default_factory=list)
     _baseline_volume: float = field(init=False, default=0.0)
+    _design_space: KrachtDesignSpace = field(init=False)
 
     def __post_init__(self) -> None:
         self._baseline_volume = _mesh_volume(self.baseline_mesh)
+        self._design_space = KrachtDesignSpace()
         Path(self.work_root).mkdir(parents=True, exist_ok=True)
 
-    def evaluate(self, vectors: Sequence[KrachtVector]) -> List[List[float]]:
+    def evaluate(
+        self,
+        vectors: Sequence[KrachtVector],
+        *,
+        froude_numbers: Sequence[float] | None = None,
+        froude_weights: Sequence[float] | None = None,
+    ) -> List[List[float]]:
+        """Evaluate ``vectors`` and return ``[aggregated_cd, vol_delta]`` rows.
+
+        Parameters
+        ----------
+        vectors:
+            KrachtVectors to evaluate.
+        froude_numbers:
+            Optional list of Froude numbers. When ``None`` (default) each
+            candidate runs simpleFoam once at the case-template default Fr
+            and the existing single-Fr behaviour is preserved bit-exactly.
+            When provided, each candidate runs simpleFoam once per Fr and
+            the per-Fr Cd values are aggregated as a weighted mean.
+        froude_weights:
+            Optional weights matching ``froude_numbers``. When ``None``,
+            uniform weights are used. The weights are normalised to sum
+            to 1.0 before aggregation.
+        """
+        normalised_weights = _normalise_froude_weights(
+            froude_numbers, froude_weights
+        )
         objectives: List[List[float]] = []
         for vector in vectors:
-            row = self._evaluate_one(vector)
+            if froude_numbers is None:
+                row = self._evaluate_one(vector)
+            else:
+                row = self._evaluate_one_multi_fr(
+                    vector,
+                    list(froude_numbers),
+                    list(normalised_weights or []),
+                )
             objectives.append(row)
         return objectives
 
-    def _evaluate_one(self, vector: KrachtVector) -> List[float]:
-        deformed = self.deformer.deform(self.baseline_mesh, self.region, vector)
+    def _evaluate_one_multi_fr(
+        self,
+        vector: KrachtVector,
+        froude_numbers: list[float],
+        froude_weights: list[float],
+    ) -> List[float]:
+        """Run simpleFoam once per Fr, aggregate Cd as a weighted mean.
+
+        Volume delta is identical across Fr (geometry is invariant), so we
+        pick whichever value the per-Fr runs report (they agree).
+        """
+        per_fr_rows: list[List[float]] = []
+        for fr in froude_numbers:
+            row = self._evaluate_one(vector, froude_number=float(fr))
+            per_fr_rows.append(row)
+
+        # If every per-Fr row hit the same up-front penalty (constraint
+        # violation, STL invalid) the aggregate is just that penalty —
+        # bail out rather than mix penalty Cd into a weighted mean.
+        if all(row == [1e9, 1e9] for row in per_fr_rows):
+            return [1e9, 1e9]
+
+        cd_values = [row[0] for row in per_fr_rows]
+        vol_deltas = [row[1] for row in per_fr_rows]
+        aggregated_cd = sum(
+            w * cd for w, cd in zip(froude_weights, cd_values)
+        )
+        # Volume delta is geometry-only; pick the first valid one (they
+        # are all the same).
+        return [float(aggregated_cd), float(vol_deltas[0])]
+
+    def _evaluate_one(
+        self,
+        vector: KrachtVector,
+        *,
+        froude_number: float | None = None,
+    ) -> List[float]:
+        constraint_violations = self._design_space.constraint_violations(vector)
+        if constraint_violations:
+            self.evaluation_records.append(
+                {
+                    "parameters": dict(vector.values),
+                    "solver_status": "skipped",
+                    "solver_reason": "constraint_violation",
+                    "constraint_violations": list(constraint_violations),
+                    "objectives": [1e9, 1e9],
+                }
+            )
+            return [1e9, 1e9]
+
         candidate_id = f"candidate-{uuid.uuid4().hex[:8]}"
-        candidate_case_dir = Path(self.work_root) / candidate_id
+        deformed = self.deformer.deform(self.baseline_mesh, self.region, vector)
+        stl_report = validate_stl(deformed)
+        if not stl_report["checks_passed"]:
+            self.evaluation_records.append(
+                {
+                    "parameters": dict(vector.values),
+                    "foam_candidate_id": candidate_id,
+                    "solver_status": "skipped",
+                    "solver_reason": "stl_invalid",
+                    "stl_report": stl_report,
+                    "objectives": [1e9, 1e9],
+                }
+            )
+            return [1e9, 1e9]
+
+        # Default single-Fr path puts the candidate at work_root/<id> so
+        # the existing tests that watch per-candidate dirs still pass. For
+        # multi-Fr we drop into a per-Fr sub-dir so each simpleFoam run
+        # gets its own postProcessing tree.
+        if froude_number is None:
+            candidate_case_dir = Path(self.work_root) / candidate_id
+        else:
+            fr_label = f"fr_{froude_number:.4f}".replace(".", "p").replace("-", "m")
+            candidate_case_dir = Path(self.work_root) / candidate_id / fr_label
         candidate_case_dir.mkdir(parents=True, exist_ok=True)
 
         geometry_path = candidate_case_dir / "input" / "candidate.stl"
@@ -84,24 +192,54 @@ class SimpleFoamHighFidelityGate:
 
         drag_proxy = _drag_proxy(deformed, self.region)
         volume_delta = _volume_delta(deformed, self._baseline_volume)
+        record = {
+            "parameters": dict(vector.values),
+            "foam_candidate_id": candidate_id,
+            "candidate_work_dir": str(candidate_case_dir),
+            "input_geometry_path": str(geometry_path),
+            "drag_proxy": float(drag_proxy),
+            "volume_delta": float(volume_delta),
+        }
+        if froude_number is not None:
+            record["froude_number"] = float(froude_number)
 
         try:
-            manifest = self.build_case(
-                candidate_case_dir,
-                best_candidate_id=candidate_id,
-                best_candidate_geometry_path=geometry_path,
-            )
+            build_kwargs: dict = {
+                "best_candidate_id": candidate_id,
+                "best_candidate_geometry_path": geometry_path,
+            }
+            if froude_number is not None:
+                build_kwargs["froude_number"] = float(froude_number)
+            manifest = self.build_case(candidate_case_dir, **build_kwargs)
             run_manifest = self.run_case(
                 candidate_case_dir / "working" / "openfoam_case",
                 case_manifest=manifest,
                 execute=True,
             )
         except Exception:
-            return [_penalty_value(drag_proxy), volume_delta]
+            objectives = [_penalty_value(drag_proxy), volume_delta]
+            record.update(
+                {
+                    "solver_status": "exception",
+                    "objectives": list(objectives),
+                }
+            )
+            self.evaluation_records.append(record)
+            return objectives
 
         status = run_manifest.get("status", "unknown")
+        record.update(
+            {
+                "solver_status": status,
+                "solver_reason": run_manifest.get("reason"),
+                "run_manifest": run_manifest,
+            }
+        )
         if status != "executed_ok":
-            return [_penalty_value(drag_proxy), volume_delta]
+            objectives = [_penalty_value(drag_proxy), volume_delta]
+            record["objectives"] = list(objectives)
+            self.evaluation_records.append(record)
+            return objectives
 
         # Try to read real forceCoeffs drag; fall back to geometric proxy
         # when the file is missing (e.g. simpleFoam didn't run because the
@@ -113,11 +251,52 @@ class SimpleFoamHighFidelityGate:
             reference_area=self.reference_area_m2,
             fluid_density=self.fluid_density_kg_m3,
         )
+        record["force_coeffs"] = cd_report
         if cd_report is not None and cd_report.get("drag_newtons") is not None:
-            return [float(cd_report["drag_newtons"]), volume_delta]
+            objectives = [float(cd_report["drag_newtons"]), volume_delta]
+            record["objectives"] = list(objectives)
+            self.evaluation_records.append(record)
+            return objectives
         if cd_report is not None:
-            return [float(cd_report["final_cd"]), volume_delta]
-        return [drag_proxy, volume_delta]
+            objectives = [float(cd_report["final_cd"]), volume_delta]
+            record["objectives"] = list(objectives)
+            self.evaluation_records.append(record)
+            return objectives
+        objectives = [drag_proxy, volume_delta]
+        record["objectives"] = list(objectives)
+        self.evaluation_records.append(record)
+        return objectives
+
+
+def _normalise_froude_weights(
+    froude_numbers: Sequence[float] | None,
+    froude_weights: Sequence[float] | None,
+) -> list[float] | None:
+    """Validate and normalise the per-Fr weights to sum to 1.0.
+
+    Returns ``None`` when ``froude_numbers`` is ``None`` (single-Fr path).
+    Raises ``ValueError`` when the inputs are inconsistent.
+    """
+    if froude_numbers is None:
+        return None
+    fr_list = list(froude_numbers)
+    if not fr_list:
+        raise ValueError("froude_numbers must contain at least one entry")
+    if froude_weights is None:
+        uniform = 1.0 / len(fr_list)
+        return [uniform for _ in fr_list]
+    weights = [float(w) for w in froude_weights]
+    if len(weights) != len(fr_list):
+        raise ValueError(
+            "froude_weights length must match froude_numbers length "
+            f"({len(weights)} vs {len(fr_list)})"
+        )
+    if any(w < 0.0 for w in weights):
+        raise ValueError("froude_weights entries must be non-negative")
+    total = sum(weights)
+    if total <= 0.0:
+        raise ValueError("froude_weights must have a positive sum")
+    return [w / total for w in weights]
 
 
 def _drag_proxy(mesh: trimesh.Trimesh, region: dict) -> float:
@@ -181,7 +360,14 @@ def _read_force_coeffs(
     if not subdirs:
         return None
     latest = max(subdirs, key=lambda p: p.stat().st_mtime)
-    dat_path = latest / "coefficient.dat"
+    dat_path = next(
+        (
+            latest / filename
+            for filename in ("forceCoeffs.dat", "coefficient.dat")
+            if (latest / filename).exists()
+        ),
+        latest / "coefficient.dat",
+    )
     try:
         return parse_drag_coefficient_dat(
             dat_path,

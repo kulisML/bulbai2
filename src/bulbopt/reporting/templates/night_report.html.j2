@@ -15,12 +15,120 @@
       .warn { background: #fff4d6; }
       .ok { background: #e3f3de; }
       .note { color: #666; font-size: 0.9em; margin-top: 0.3em; }
+      section.pareto-plot { margin-top: 1em; }
+      section.pareto-plot svg { max-width: 100%; height: auto; }
+      section.fuel-savings { margin-top: 1em; }
+      section.fuel-savings .summary { font-size: 1.05em; padding: 0.4em 0.6em; }
+      section.fuel-savings .summary.positive { background: #e3f3de; }
+      section.fuel-savings .summary.neutral { background: #f3f3f3; }
+      section.fuel-savings .summary.negative { background: #fff4d6; }
     </style>
   </head>
   <body>
     <h1>BulbOpt Night Run</h1>
     <p><strong>Case:</strong> {{ case_name }} &mdash; <strong>Status:</strong> {{ status }}</p>
     <p><strong>Winner:</strong> {{ winner_id or "n/a" }}</p>
+    {% if engineering_outcome %}
+    <p class="{{ 'ok' if engineering_outcome.status == 'engineering_winner' else 'warn' }}" style="padding: 6px 8px;">
+      <strong>Engineering outcome:</strong> {{ engineering_outcome.status }}
+      &mdash; {{ engineering_outcome.message }}
+    </p>
+    {% endif %}
+
+    {% if pareto_plot_svg %}
+    <section class="pareto-plot">
+      <h2>Pareto plot</h2>
+      <p class="note">Resistance proxy (x) vs. volume delta (y). Winner is highlighted in red. Penalty candidates are dropped before scaling.</p>
+      {{ pareto_plot_svg|safe }}
+    </section>
+    {% endif %}
+
+    {% if fuel_savings %}
+    <section class="fuel-savings">
+      <h2>Annual fuel-savings projection</h2>
+      {% if fuel_savings.drag_reduction_pct > 0 %}
+      <p class="summary positive">
+        <strong>Projected savings:</strong>
+        {{ "%.2f"|format(fuel_savings.drag_reduction_pct) }}% drag reduction &rarr;
+        {{ "%.0f"|format(fuel_savings.fuel_savings_t_per_year) }} t/year fuel
+        &rarr; ${{ fuel_savings.fuel_savings_usd_per_year_formatted }}/year.
+      </p>
+      {% elif fuel_savings.drag_reduction_pct == 0 %}
+      <p class="summary neutral">
+        <strong>No improvement:</strong>
+        winner resistance proxy matches the baseline.
+      </p>
+      {% else %}
+      <p class="summary negative">
+        <strong>No improvement:</strong>
+        winner resistance proxy is {{ "%.2f"|format(-fuel_savings.drag_reduction_pct) }}%
+        worse than the baseline; treat the night-run as inconclusive.
+      </p>
+      {% endif %}
+      <table class="narrow">
+        <tr><th>Drag reduction</th><td>{{ "%.2f"|format(fuel_savings.drag_reduction_pct) }}%</td></tr>
+        <tr><th>Baseline drag proxy</th><td>{{ "%.4f"|format(fuel_savings.drag_proxy_baseline) }}</td></tr>
+        <tr><th>Winner drag proxy</th><td>{{ "%.4f"|format(fuel_savings.drag_proxy_winner) }}</td></tr>
+        <tr><th>Fuel savings (t/year)</th><td>{{ "%.0f"|format(fuel_savings.fuel_savings_t_per_year) }}</td></tr>
+        <tr><th>Fuel savings (USD/year)</th><td>${{ fuel_savings.fuel_savings_usd_per_year_formatted }}</td></tr>
+      </table>
+      <p class="note">Industry rule of thumb: a 1% reduction in drag yields roughly a 1% reduction in fuel consumption. Defaults assume 30,000 t/year burn at 600 USD/t (Panamax-class container ship reference). Adjust for the specific operator profile.</p>
+    </section>
+    {% endif %}
+
+    {% if stl_invalid_candidates %}
+    <h2 class="warn" style="padding: 6px 8px;">STL sanity-check warnings ({{ stl_invalid_candidates|length }})</h2>
+    <p class="note">One or more top candidates failed the watertight / winding / volume sanity check. Their STLs may not be usable for downstream CFD or CAD.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>candidate</th>
+          <th>watertight</th>
+          <th>winding consistent</th>
+          <th>volume</th>
+          <th>vertex count</th>
+          <th>face count</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in stl_invalid_candidates %}
+        <tr class="warn">
+          <td>{{ entry.candidate_id }}</td>
+          <td>{{ entry.report.watertight }}</td>
+          <td>{{ entry.report.winding_consistent }}</td>
+          <td>{{ "%.4f"|format(entry.report.volume) }}</td>
+          <td>{{ entry.report.vertex_count }}</td>
+          <td>{{ entry.report.face_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if parameter_warning_candidates %}
+    <h2 class="warn" style="padding: 6px 8px;">Manufacturability parameter warnings ({{ parameter_warning_candidates|length }})</h2>
+    <p class="note">These candidates passed hard constraints but are close to parameter regions that can create folded, sharp, or hard-to-manufacture bulb geometry.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>candidate</th>
+          <th>warnings</th>
+          {% for name in parameter_names %}<th>{{ name }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in parameter_warning_candidates %}
+        <tr class="warn">
+          <td>{{ entry.candidate_id }}</td>
+          <td>{{ entry.warnings|join(", ") }}</td>
+          {% for name in parameter_names %}
+          <td>{{ "%.4f"|format(entry.parameters[name]) }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
 
     <h2>Run summary</h2>
     <table class="narrow">
@@ -34,6 +142,33 @@
       <tr><th>High-fidelity backend</th><td>{{ high_gate_backend }}</td></tr>
     </table>
 
+    {% if warm_start_summary %}
+    <h2>Warm-start composition</h2>
+    <table class="narrow">
+      <tr><th>Requested history rows</th><td>{{ warm_start_summary.requested }}</td></tr>
+      <tr><th>Seeded elites</th><td>{{ warm_start_summary.seeded }}</td></tr>
+      <tr><th>Mutated elites</th><td>{{ warm_start_summary.mutated }}</td></tr>
+      <tr><th>Random exploration</th><td>{{ warm_start_summary.random }}</td></tr>
+      <tr><th>Deduplicated</th><td>{{ warm_start_summary.deduplicated }}</td></tr>
+      <tr><th>Rejected by constraints</th><td>{{ warm_start_summary.rejected_by_constraints }}</td></tr>
+      {% if warm_start_summary.evidence_eligibility %}
+      <tr><th>Evidence rows eligible</th><td>{{ warm_start_summary.evidence_eligibility.eligible }}</td></tr>
+      <tr><th>Geometry high-risk evidence rejected</th><td>{{ warm_start_summary.evidence_eligibility.geometry_high_risk }}</td></tr>
+      <tr><th>Manufacturability warning evidence rejected</th><td>{{ warm_start_summary.evidence_eligibility.manufacturability_warning }}</td></tr>
+      {% endif %}
+      <tr><th>Random exploration ratio</th><td>{{ "%.2f"|format(warm_start_summary.random_exploration_ratio) }}</td></tr>
+    </table>
+    {% endif %}
+
+    {% if engineering_summary %}
+    <h2>Baseline comparison</h2>
+    <table class="narrow">
+      <tr><th>Baseline Cd</th><td>{{ "%.6f"|format(engineering_summary.baseline_cd) }}</td></tr>
+      <tr><th>Best candidate Cd</th><td>{{ "%.6f"|format(engineering_summary.winner_cd) }}</td></tr>
+      <tr><th>Improvement vs baseline</th><td>{{ "%.2f"|format(engineering_summary.improvement_percent) }}%</td></tr>
+    </table>
+    {% endif %}
+
     <h2>Gate timings</h2>
     <table>
       <thead><tr><th>Gate</th><th>Seconds</th></tr></thead>
@@ -46,13 +181,14 @@
 
     <h2>Pareto front — {{ pareto_size }} candidates</h2>
     {% if pareto_candidates %}
-    <p class="note">Two objectives minimised: drag proxy (left) and volume delta (right). Lower is better on both.</p>
+    <p class="note">Three objectives minimised: drag proxy, volume delta, mesh quality. Lower is better on all.</p>
     <table>
       <thead>
         <tr>
           <th>#</th>
           <th>drag / Cd</th>
           <th>volume Δ</th>
+          <th>mesh quality</th>
           {% for name in parameter_names %}<th>{{ name }}</th>{% endfor %}
         </tr>
       </thead>
@@ -62,6 +198,7 @@
           <td>{{ loop.index }}</td>
           <td>{{ "%.4f"|format(candidate.objectives[0]) }}</td>
           <td>{{ "%.4f"|format(candidate.objectives[1]) }}</td>
+          <td>{{ "%.4f"|format(candidate.objectives[2] if candidate.objectives|length > 2 else 0.0) }}</td>
           {% for name in parameter_names %}
           <td>{{ "%.4f"|format(candidate.parameters[name]) }}</td>
           {% endfor %}
@@ -73,6 +210,33 @@
     <p class="note">No Pareto candidates produced (budget exhausted before first generation?).</p>
     {% endif %}
 
+    {% if rejected_candidates %}
+    <h2 class="warn" style="padding: 6px 8px;">Rejected high-fidelity candidates ({{ rejected_candidates|length }})</h2>
+    <p class="note">These candidates were evaluated or promoted, but were not eligible to become engineering winners.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>candidate</th>
+          <th>reasons</th>
+          <th>drag / Cd</th>
+          <th>volume delta</th>
+          <th>STL</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rejected in rejected_candidates %}
+        <tr class="warn">
+          <td>{{ rejected.candidate_id }}</td>
+          <td>{{ rejected.reasons|join(", ") }}</td>
+          <td>{{ "%.4f"|format(rejected.objectives[0] if rejected.objectives else 0.0) }}</td>
+          <td>{{ "%.4f"|format(rejected.objectives[1] if rejected.objectives|length > 1 else 0.0) }}</td>
+          <td><code>{{ rejected.stl_path or "n/a" }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
     <h2>Top high-fidelity candidates ({{ high_fidelity_size }})</h2>
     {% if high_fidelity %}
     <table>
@@ -80,6 +244,7 @@
         <tr>
           <th>#</th>
           <th>drag / Cd / Newtons</th>
+          <th>parameter warnings</th>
           <th>volume Δ</th>
           <th>STL</th>
         </tr>
@@ -89,6 +254,7 @@
         <tr class="ok">
           <td>{{ loop.index }}</td>
           <td>{{ "%.4f"|format(result.objectives[0]) }}</td>
+          <td>{{ result.parameter_warnings|join(", ") if result.parameter_warnings else "none" }}</td>
           <td>{{ "%.4f"|format(result.objectives[1]) }}</td>
           <td><code>{{ result.stl_path }}</code></td>
         </tr>

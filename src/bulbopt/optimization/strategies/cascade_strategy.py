@@ -21,8 +21,9 @@ wire mid=potentialFoam / high=simpleFoam without touching this module.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, List
+from typing import Callable, List, Sequence
 
+from bulbopt.execution.worker.parallel_worker import ParallelWorker
 from bulbopt.optimization.parametric.kracht_space import (
     KrachtDesignSpace,
     KrachtVector,
@@ -32,6 +33,7 @@ from bulbopt.optimization.scheduler.budget_scheduler import (
     BudgetScheduler,
 )
 from bulbopt.optimization.strategies.nsga2_strategy import (
+    GenerationSnapshotFn,
     NSGA2Strategy,
     ParetoCandidate,
     ParetoFront,
@@ -77,6 +79,10 @@ class CascadeStrategy:
         mid_gate: Gate,
         high_gate: Gate,
         seed: int | None = None,
+        n_objectives: int = 2,
+        warm_start_vectors: Sequence[KrachtVector] | None = None,
+        on_generation_snapshot: GenerationSnapshotFn | None = None,
+        parallel_workers: int = 1,
     ) -> None:
         if high_fidelity_budget < 0:
             raise ValueError("high_fidelity_budget must be >= 0")
@@ -88,6 +94,20 @@ class CascadeStrategy:
         self._mid_gate = mid_gate
         self._high_gate = high_gate
         self._seed = seed
+        self._n_objectives = int(n_objectives)
+        self._warm_start_vectors: List[KrachtVector] = (
+            list(warm_start_vectors) if warm_start_vectors else []
+        )
+        # Spec 2026-04-22 §10.2: per-generation snapshot callback. Forwarded
+        # straight to NSGA2Strategy so the use case can persist a
+        # ``gen-NN/`` directory after each pymoo generation.
+        self._on_generation_snapshot = on_generation_snapshot
+        # Spec 2026-04-22 §8: optional fan-out of mid-gate evaluations
+        # across worker processes. Default 1 keeps the existing test
+        # corpus (282 sequential tests) bit-identical. >1 wraps the
+        # mid-gate evaluator with ``ParallelWorker`` at run time so the
+        # NSGA-II loop transparently parallelises every generation.
+        self._parallel_workers = int(parallel_workers)
 
     # ---- main entry ------------------------------------------------------
 
@@ -111,6 +131,21 @@ class CascadeStrategy:
     def _run_nsga2_with_mid_gate(self) -> ParetoFront:
         """Mid-gate evaluator also charges the scheduler per call."""
 
+        # Spec §8: fan-out wrapper. When ``parallel_workers > 1`` the
+        # mid-gate evaluator is dispatched across worker processes; the
+        # scheduler call itself stays in the main process so the budget
+        # bookkeeping is centralised. When ``parallel_workers <= 1`` the
+        # ParallelWorker takes the direct-call path so behaviour is
+        # bit-identical to the pre-§8 cascade.
+        if self._parallel_workers > 1:
+            parallel = ParallelWorker(max_workers=self._parallel_workers)
+
+            def mid_evaluate(vectors: List[KrachtVector]) -> List[List[float]]:
+                return parallel.evaluate(self._mid_gate.evaluate, vectors)
+        else:
+            def mid_evaluate(vectors: List[KrachtVector]) -> List[List[float]]:
+                return self._mid_gate.evaluate(vectors)
+
         def accounted_evaluate(vectors: List[KrachtVector]) -> List[List[float]]:
             try:
                 self._scheduler.allocate(
@@ -120,13 +155,16 @@ class CascadeStrategy:
             except BudgetExhausted:
                 # Return penalty fitness so NSGA-II can still converge
                 # (large finite values, never NaN, so sort still works).
-                return [[1e9] * 2 for _ in vectors]
-            return self._mid_gate.evaluate(vectors)
+                return [[1e9] * self._n_objectives for _ in vectors]
+            return mid_evaluate(vectors)
 
         strategy = NSGA2Strategy(
             population=self._population,
             generations=self._generations,
             seed=self._seed,
+            n_objectives=self._n_objectives,
+            warm_start_vectors=self._warm_start_vectors,
+            on_generation_snapshot=self._on_generation_snapshot,
         )
         return strategy.optimize(space=self._space, evaluate=accounted_evaluate)
 
@@ -142,7 +180,12 @@ class CascadeStrategy:
         # objectives trade off perfectly, crowding picks the extremes —
         # that's fine for a first pass.
         ranked: List[ParetoCandidate] = sorted(
-            pareto_front.candidates, key=lambda c: c.objectives[0]
+            (
+                c
+                for c in pareto_front.candidates
+                if c.objectives and float(c.objectives[0]) < 1e8
+            ),
+            key=lambda c: c.objectives[0],
         )
         top = ranked[: self._high_fidelity_budget]
         if not top:

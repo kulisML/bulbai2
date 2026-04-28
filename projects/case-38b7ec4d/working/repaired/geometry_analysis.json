@@ -1,0 +1,42 @@
+{
+  "quality_report": {
+    "watertight": true,
+    "repaired": true,
+    "repair_status": "repaired",
+    "vertices_count": 14630,
+    "faces_count": 29256,
+    "vertices_count_before": 14638,
+    "faces_count_before": 29272,
+    "watertight_before": false,
+    "surface_area": 18867.77986231665,
+    "volume": 84007.5710061844,
+    "bounds": [
+      [
+        -194.90433,
+        -4.7969222,
+        -16.29178
+      ],
+      [
+        48.01432,
+        25.680399,
+        16.29178
+      ]
+    ],
+    "extents": [
+      242.91864999999999,
+      30.477321200000002,
+      32.58356
+    ],
+    "primary_axis": 0
+  },
+  "repaired_path": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-38b7ec4d\\working\\repaired\\repaired.stl",
+  "bulb_region": {
+    "axis_index": 0,
+    "axis_min": 11.576522500000003,
+    "axis_max": 48.01432,
+    "mask_ratio": 0.3440874914559125,
+    "auto_axis_min": 11.576522500000003,
+    "auto_axis_max": 48.01432,
+    "confirmation_source": "auto_detected"
+  }
+}

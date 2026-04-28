@@ -1,0 +1,116 @@
+{
+  "trace": [
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 250.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 500.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 750.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 1000.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 1250.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 1500.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 1750.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 2000.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 2250.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 2500.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 2750.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 3000.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 3250.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 3500.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 3750.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 4000.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 4250.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 4500.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 4750.0
+    },
+    {
+      "gate": "mid",
+      "seconds": 250.0,
+      "cumulative_seconds": 5000.0
+    },
+    {
+      "gate": "high",
+      "seconds": 3000.0,
+      "cumulative_seconds": 8000.0
+    }
+  ],
+  "gate_timings": {
+    "mid": 5000.0,
+    "high": 3000.0
+  },
+  "runtime_budget_hours": 8.0,
+  "remaining_seconds": 20800.0,
+  "budget_exhausted": false
+}

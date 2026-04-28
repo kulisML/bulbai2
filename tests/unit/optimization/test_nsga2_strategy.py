@@ -133,3 +133,49 @@ def test_nsga2_strategy_fires_per_generation_callback() -> None:
         assert event["generation"] == index
         assert "evaluations" in event
         assert "non_dominated_count" in event
+
+
+def test_nsga2_strategy_invokes_generation_callback_per_generation() -> None:
+    """Spec §10.2 — for per-generation snapshots the night flow needs a
+    richer callback: each generation hands back the full population, the
+    objectives matrix, and the current Pareto front so the use case can
+    persist them under ``working/night_optimization/generations/``.
+
+    The callback fires exactly once per generation with monotonically
+    increasing ``generation_index`` starting at 0.
+    """
+    space = KrachtDesignSpace()
+    events: list[dict] = []
+
+    def on_generation_snapshot(
+        generation_index: int,
+        population: list[KrachtVector],
+        objectives: list[list[float]],
+        pareto: list,
+    ) -> None:
+        events.append(
+            {
+                "generation_index": int(generation_index),
+                "n_individuals": len(population),
+                "n_objectives_rows": len(objectives),
+                "n_pareto": len(pareto),
+            }
+        )
+
+    strategy = NSGA2Strategy(
+        population=8,
+        generations=3,
+        seed=11,
+        on_generation_snapshot=on_generation_snapshot,
+    )
+    strategy.optimize(space=space, evaluate=_bi_objective_evaluate)
+
+    assert len(events) == 3
+    indices = [event["generation_index"] for event in events]
+    assert indices == [0, 1, 2]
+    for event in events:
+        assert event["n_individuals"] == 8
+        assert event["n_objectives_rows"] == 8
+        # Pareto front size cannot exceed the population, but must be >= 1
+        # because at least one point is non-dominated.
+        assert 1 <= event["n_pareto"] <= 8

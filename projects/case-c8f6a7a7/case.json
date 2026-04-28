@@ -1,0 +1,22 @@
+{
+  "case_id": "case-c8f6a7a7",
+  "case_name": "full-night-wsl-20260424-091347",
+  "status": "completed",
+  "created_at": "2026-04-24T06:13:50+00:00",
+  "updated_at": "2026-04-24T07:23:36+00:00",
+  "is_recoverable": false,
+  "source_path": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\docs\\base_hull.stl",
+  "summary_metrics": {
+    "night_optimization": {
+      "pareto_size": 50,
+      "high_fidelity_size": 10,
+      "budget_exhausted": false,
+      "winner_id": "candidate-001",
+      "gate_timings": {
+        "mid": 5000.0,
+        "high": 3000.0
+      }
+    }
+  },
+  "candidates": []
+}

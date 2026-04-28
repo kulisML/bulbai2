@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 
 import trimesh
+
+
+# Realistic displacement-hull Froude range (Fr = V / sqrt(g * L)). Values
+# below 0.2 are harbour-speed; above 0.35 hulls start to plane — outside
+# the ships we target. Uniformly-spaced 5-sample sweep is the default.
+DEFAULT_FROUDE_SAMPLES: tuple[float, ...] = (0.15, 0.20, 0.25, 0.30, 0.35)
 
 
 class StubEvaluationAdapter:
@@ -79,6 +86,21 @@ class StubEvaluationAdapter:
             )
             resistance_proxy = max(score_components["resistance_proxy"], 1e-6)
             fast_score = round(1.0 / resistance_proxy, 6)
+
+            # Froude sweep: aggregate the resistance contribution across 5
+            # realistic displacement-hull Fr values so the scoring reflects
+            # performance across the whole operational envelope, not a
+            # single design speed.
+            froude_sweep = self._resistance_across_froude_sweep(
+                resistance_proxy=resistance_proxy,
+                geometry_metrics=geometry_metrics,
+                operational_profile_weights=operational_profile_weights,
+            )
+            score_components["froude_sweep_samples"] = froude_sweep["samples"]
+            score_components["froude_sweep_aggregate_resistance"] = (
+                froude_sweep["aggregate_resistance"]
+            )
+
             mid_score = round(
                 (weights["resistance_weight"] * resistance_proxy)
                 - (weights["axial_gain_weight"] * geometry_metrics["axial_gain_m"])
@@ -89,7 +111,8 @@ class StubEvaluationAdapter:
             mid_score = round(
                 mid_score
                 + (0.05 * score_components["hydrostatic_penalty"])
-                + (0.012 * score_components["multi_condition_penalty"]),
+                + (0.012 * score_components["multi_condition_penalty"])
+                + (0.02 * froude_sweep["aggregate_resistance"]),
                 6,
             )
             evaluated.append(
@@ -745,6 +768,99 @@ class StubEvaluationAdapter:
     def _build_froude_number(self, speed_knots: float, reference_length_m: float) -> float:
         speed_ms = float(speed_knots) * 0.514444
         return speed_ms / max((9.81 * max(reference_length_m, 1e-6)) ** 0.5, 1e-6)
+
+    def _resistance_across_froude_sweep(
+        self,
+        *,
+        resistance_proxy: float,
+        geometry_metrics: dict[str, float],
+        operational_profile_weights: list[float] | None,
+        froude_samples: Sequence[float] = DEFAULT_FROUDE_SAMPLES,
+    ) -> dict[str, object]:
+        """Compute a per-Froude resistance contribution.
+
+        The resistance proxy is the base geometric "frontal area / axial
+        extent" scalar. At each sampled Froude number we multiply it by a
+        wave-resistance amplification that rises with Fr (the hull-wave
+        interaction grows faster-than-linearly near the hump) and reduces
+        back at low Fr where viscous drag dominates. The model is the
+        same wave resistance curve the single-speed path used, just
+        evaluated on a grid.
+
+        The aggregate is a weighted mean — either the caller's
+        operational profile weights (truncated / padded to match the
+        sample count) or equal weights per sample when unspecified.
+
+        Returns
+        -------
+        dict with:
+            ``samples`` — list of ``{froude, resistance}`` pairs for every
+            sampled Fr.
+            ``aggregate_resistance`` — weighted mean across samples.
+            ``weights`` — normalised weight vector actually used.
+            ``profile_source`` — ``"user_defined"`` or ``"equal"``.
+        """
+        froudes = [max(float(fr), 0.0) for fr in froude_samples]
+        if not froudes:
+            return {
+                "samples": [],
+                "aggregate_resistance": 0.0,
+                "weights": [],
+                "profile_source": "empty",
+            }
+
+        # Wave-resistance amplification. Cw(Fr) peaks around Fr ≈ 0.3 (the
+        # classical prismatic-coefficient wave hump) then drops again.
+        # Reproduce that shape with a simple quadratic around 0.3.
+        slenderness = max(float(geometry_metrics.get("slenderness_ratio", 4.0)), 1.0)
+        slenderness_relief = 1.0 / min(slenderness, 8.0)
+        samples: list[dict[str, float]] = []
+        for fr in froudes:
+            # Amplification factor: 1 at Fr=0, peak ~1.6 at Fr=0.3, then
+            # decays. This is not a full Michell/Savitsky model — it is a
+            # proxy that captures the qualitative shape so different Fr
+            # samples actually produce different resistance values.
+            amplification = 1.0 + (4.5 * fr * fr) - (6.0 * (fr - 0.3) * (fr - 0.3))
+            amplification = max(amplification, 0.0)
+            # Slender hulls see less added wave resistance at peak.
+            amplification *= 0.85 + (0.3 * slenderness_relief)
+            resistance = round(resistance_proxy * (0.25 + amplification), 6)
+            samples.append({"froude": round(fr, 6), "resistance": resistance})
+
+        weights, source = self._resolve_froude_sweep_weights(
+            froudes, operational_profile_weights
+        )
+        aggregate = sum(
+            sample["resistance"] * weight for sample, weight in zip(samples, weights)
+        )
+        return {
+            "samples": samples,
+            "aggregate_resistance": round(aggregate, 6),
+            "weights": [round(w, 6) for w in weights],
+            "profile_source": source,
+        }
+
+    def _resolve_froude_sweep_weights(
+        self,
+        froudes: list[float],
+        operational_profile_weights: list[float] | None,
+    ) -> tuple[list[float], str]:
+        """Pick a normalised weight vector matching the Froude samples.
+
+        Caller-supplied weights are trimmed or padded with zeros to match
+        the sample count, then normalised. Falling back to equal weights
+        when the caller didn't supply anything keeps the aggregate
+        interpretable as "expected resistance across operating envelope".
+        """
+        if operational_profile_weights:
+            raw = [max(float(w), 0.0) for w in operational_profile_weights[: len(froudes)]]
+            if len(raw) < len(froudes):
+                raw.extend([0.0] * (len(froudes) - len(raw)))
+            total = sum(raw)
+            if total > 0:
+                return [w / total for w in raw], "user_defined"
+        equal = 1.0 / max(len(froudes), 1)
+        return [equal for _ in froudes], "equal"
 
     def _specific_fuel_consumption_kg_per_kwh(self, load_ratio: float) -> float:
         normalized_ratio = min(max(float(load_ratio), 0.35), 1.1)

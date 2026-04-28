@@ -1,0 +1,65 @@
+{
+  "runner_status": "executed_ok",
+  "runner_reason": "solver_chain_completed",
+  "runner_recoverable": true,
+  "runner_case_directory": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\working\\openfoam_case",
+  "runtime_backend": "wsl",
+  "wsl_distro": "Ubuntu-22.04",
+  "wsl_bashrc": "/opt/openfoam13/etc/bashrc",
+  "status": "executed_ok",
+  "reason": "solver_chain_completed",
+  "is_recoverable": true,
+  "best_candidate_id": "candidate-1cbcc8e7",
+  "executed_steps": [
+    {
+      "command": [
+        "blockMesh"
+      ],
+      "returncode": 0,
+      "stdout_tail": "========                 |\n  \\\\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox\n   \\\\    /   O peration     | Website:  https://openfoam.org\n    \\\\  /    A nd           | Version:  13\n     \\\\/     M anipulation  |\n\\*---------------------------------------------------------------------------*/\nBuild  : 13-441953dfbb42\nExec   : blockMesh\nDate   : Apr 24 2026\nTime   : 09:46:36\nHost   : \"DESKTOP-NKIGO8J\"\nPID    : 20823\nI/O    : uncollated\nCase   : /mnt/c/Users/\u0421\u0402\u0421\u0403/Desktop/bulbop2/bulbai2/projects/case-c8f6a7a7/working/night_optimization/foam_candidates/candidate-1cbcc8e7/working/openfoam_case\nnProcs : 1\nsigFpe : Enabling floating point exception trapping (FOAM_SIGFPE).\nfileModificationChecking : Monitoring run-time modified files using timeStampMaster (fileModificationSkew 10)\nallowSystemOperations : Allowing user-supplied system call operations\n\n// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //\nCreate time\n\nReading \"blockMeshDict\"\n\nCreating block mesh from\n    \"system/blockMeshDict\"\nNo non-linear block edges defined\nNo non-planar block faces defined\nCreating topology blocks\nCreating topology patches\n\nCreating block mesh topology\n\nBasic statistics\n    Number of internal faces : 0\n    Number of boundary faces : 6\n    Number of defined boundary faces : 6\n    Number of undefined boundary faces : 0\n\nChecking topology\nCreating block offsets\nCreating merge list .\n\nCreating polyMesh from blockMesh\nCreating patches\nCreating cells\nCreating points with scale 1\n    Block 0 cell size :\n        i : 0.9 .. 0.9\n        j : 0.6 .. 0.6\n        k : 0.6\n\nNo patch pairs to merge\n\nWriting polyMesh\n----------------\nMesh Information\n----------------\n  boundingBox: (-12 -6 -6) (24 6 6)\n  nPoints: 18081\n  nCells: 16000\n  nFaces: 50000\n  nInternalFaces: 46000\n----------------\nPatches\n----------------\n  patch 0 (start: 46000 size: 400) name: inlet\n  patch 1 (start: 46400 size: 400) name: outlet\n  patch 2 (start: 46800 size: 3200) name: farField\n\nEnd\n\n",
+      "stderr_tail": "",
+      "stdout_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\blockMesh.log",
+      "stderr_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\blockMesh.err.log"
+    },
+    {
+      "command": [
+        "snappyHexMesh",
+        "-overwrite"
+      ],
+      "returncode": 0,
+      "stdout_tail": "     : 0\n    faces with face twist < 0.02                           : 0\n    faces on cells with determinant < 0.001                : 0\n\nMerging all points on surface that\n- are used by only two boundary faces and\n- make an angle with a cosine of more than 0.8660254038.\n\nRemoving 8247 straight edge points ...\n\nEdge intersection testing:\n    Number of edges             : 386257\n    Number of edges to retest   : 44751\n    Number of intersected edges : 24400\n\nUndo iteration 0\n----------------\nChecking faces in error :\n    non-orthogonality > 65  degrees                        : 0\n    faces with face pyramid volume < 1e-13                 : 0\n    faces with face-decomposition tet quality < 1e-15      : 0\n    faces with concavity > 80  degrees                     : 0\n    faces with skewness > 4   (internal) or 20  (boundary) : 0\n    faces with interpolation weights (0..1)  < 0.02        : 0\n    faces with volume ratio of neighbour cells < 0.01      : 0\n    faces with face twist < 0.02                           : 0\n    faces on cells with determinant < 0.001                : 0\nSnapped mesh : cells:118845  faces:386257  points:153797\nCells per refinement level:\n    0\t8932\n    1\t16120\n    2\t65911\n    3\t27882\nWriting mesh to time constant\nWrote mesh in = 5.211811 s.\nMesh snapped in = 64.17449 s.\nChecking final mesh ...\nChecking faces in error :\n    non-orthogonality > 65  degrees                        : 0\n    faces with face pyramid volume < 1e-13                 : 0\n    faces with face-decomposition tet quality < 1e-15      : 0\n    faces with concavity > 80  degrees                     : 0\n    faces with skewness > 4   (internal) or 20  (boundary) : 0\n    faces with interpolation weights (0..1)  < 0.02        : 0\n    faces with volume ratio of neighbour cells < 0.01      : 0\n    faces with face twist < 0.02                           : 0\n    faces on cells with determinant < 0.001                : 0\nFinished meshing without any errors\nFinished meshing in = 99.825199 s.\nEnd\n\n",
+      "stderr_tail": "",
+      "stdout_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\snappyHexMesh.log",
+      "stderr_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\snappyHexMesh.err.log"
+    },
+    {
+      "command": [
+        "checkMesh"
+      ],
+      "returncode": 0,
+      "stdout_tail": "boundary patches: 4\n    point zones:      0\n    face zones:       0\n    cell zones:       0\n\nOverall number of cells of each type:\n    hexahedra:     91808\n    prisms:        4989\n    wedges:        0\n    pyramids:      0\n    tet wedges:    92\n    tetrahedra:    1\n    polyhedra:     21955\n    Breakdown of polyhedra by number of faces:\n        faces   number of cells\n            4   4040\n            5   3277\n            6   5505\n            7   42\n            8   52\n            9   4391\n           10   21\n           11   19\n           12   3246\n           14   9\n           15   1253\n           17   1\n           18   99\n\nChecking topology...\n    Boundary definition OK.\n    Cell to face addressing OK.\n    Point usage OK.\n    Upper triangular ordering OK.\n    Face vertices OK.\n    Number of regions: 1 (OK).\n\nChecking patch topology for multiply connected surfaces...\n                   Patch    Faces   Points                  Surface topology\n                   inlet      673      786  ok (non-closed singly connected)\n                  outlet     1068     1296  ok (non-closed singly connected)\n                farField     4286     4690  ok (non-closed singly connected)\n                    hull    24427    29636  ok (non-closed singly connected)\n\nChecking geometry...\n    Overall domain bounding box (-12 -6.000015226 -6.010782811) (24 6.045666285 6.011083381)\n    Mesh has 3 geometric (non-empty/wedge) directions (1 1 1)\n    Mesh has 3 solution (non-empty) directions (1 1 1)\n    Max cell openness = 3.765489837e-16 OK.\n    Max aspect ratio = 7.390165724 OK.\n    Minimum face area = 0.001387951351. Maximum face area = 0.5553226287.  Face area magnitudes OK.\n    Min volume = 0.00010484928. Max volume = 0.3340322342.  Total volume = 3898.425661.  Cell volumes OK.\n    Mesh non-orthogonality Max: 64.46201069 average: 13.46766769\n    Non-orthogonality check OK.\n    Face pyramids OK.\n    Max skewness = 2.770166327 OK.\n    Coupled point location match (average 0) OK.\n\nMesh OK.\n\nEnd\n\n",
+      "stderr_tail": "",
+      "stdout_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\checkMesh.log",
+      "stderr_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\checkMesh.err.log",
+      "check_mesh_report": {
+        "max_non_orthogonality": null,
+        "max_skewness": 2.770166327,
+        "max_aspect_ratio": 7.390165724,
+        "n_illegal_cells": 0,
+        "failed_checks": null,
+        "mesh_ok": true
+      }
+    },
+    {
+      "command": [
+        "simpleFoam"
+      ],
+      "returncode": 0,
+      "stdout_tail": " min: -0.01877036731 max: 0.4785656726 average: 0.1554720709\nExecutionTime = 191.86139 s  ClockTime = 196 s\n\nTime = 199s\n\nsmoothSolver:  Solving for Ux, Initial residual = 6.295830066e-06, Final residual = 4.962653838e-07, No Iterations 2\nsmoothSolver:  Solving for Uy, Initial residual = 8.290199549e-06, Final residual = 6.605652794e-07, No Iterations 2\nsmoothSolver:  Solving for Uz, Initial residual = 1.186722898e-05, Final residual = 9.317493754e-07, No Iterations 2\nGAMG:  Solving for p, Initial residual = 4.895470303e-05, Final residual = 2.942401067e-07, No Iterations 3\ntime step continuity errors : sum local = 9.727821182e-08, global = -6.935100679e-09, cumulative = -0.000517303015\nsmoothSolver:  Solving for omega, Initial residual = 0.0006200928618, Final residual = 1.807156052e-05, No Iterations 2\nsmoothSolver:  Solving for k, Initial residual = 0.0003496712384, Final residual = 3.374108416e-05, No Iterations 2\nbounding k, min: -0.0208166695 max: 0.478577076 average: 0.1554727934\nExecutionTime = 192.625171 s  ClockTime = 197 s\n\nTime = 200s\n\nsmoothSolver:  Solving for Ux, Initial residual = 6.360330362e-06, Final residual = 5.173736878e-07, No Iterations 2\nsmoothSolver:  Solving for Uy, Initial residual = 8.322710747e-06, Final residual = 6.590957039e-07, No Iterations 2\nsmoothSolver:  Solving for Uz, Initial residual = 1.190716793e-05, Final residual = 9.587986238e-07, No Iterations 2\nGAMG:  Solving for p, Initial residual = 4.859940566e-05, Final residual = 3.391090939e-07, No Iterations 3\ntime step continuity errors : sum local = 1.12108376e-07, global = -7.608049485e-09, cumulative = -0.0005173106231\nsmoothSolver:  Solving for omega, Initial residual = 0.0006209665441, Final residual = 1.795295217e-05, No Iterations 2\nsmoothSolver:  Solving for k, Initial residual = 0.0003483928952, Final residual = 3.357949822e-05, No Iterations 2\nbounding k, min: -0.01877458857 max: 0.4786861263 average: 0.1554710236\nExecutionTime = 194.649158 s  ClockTime = 200 s\n\nEnd\n\n",
+      "stderr_tail": "",
+      "stdout_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\simpleFoam.log",
+      "stderr_log": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8f6a7a7\\working\\night_optimization\\foam_candidates\\candidate-1cbcc8e7\\logs\\openfoam\\simpleFoam.err.log"
+    }
+  ],
+  "high_fidelity_used": true
+}

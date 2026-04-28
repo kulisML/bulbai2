@@ -1,10 +1,27 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
+
+
+# Acceleration of gravity used to relate Froude number and inlet velocity.
+# Kept module-level so tests can read it back without re-defining the constant.
+_GRAVITY_ACCEL_M_S2 = 9.81
+
+# Reference length of the OpenFOAM case template (matches ``lRef`` in the
+# forceCoeffs block of ``_control_dict``). Velocities derived from a Froude
+# number are scaled as ``U = Fr * sqrt(g * lRef)``.
+_DEFAULT_LREF_M = 10.0
+
+# Inlet velocity baked into the legacy ``_initial_U`` template. Preserved so
+# that ``build_case`` with no ``froude_number`` kwarg writes bit-for-bit the
+# same case as before.
+_DEFAULT_INLET_VELOCITY_M_S = 5.0
 
 
 def _shorten_path(path: str) -> str:
@@ -57,6 +74,85 @@ def _configured_bin_dir() -> str | None:
     return None
 
 
+def _detect_wsl_openfoam(timeout_seconds: int = 20) -> dict[str, str] | None:
+    """Detect an OpenFOAM installation reachable through WSL.
+
+    Returns a small metadata dict when WSL can source an OpenFOAM bashrc and
+    resolve the core solver chain. Otherwise returns ``None``.
+    """
+    if os.environ.get("BULBOPT_DISABLE_WSL_OPENFOAM"):
+        return None
+    if sys.platform != "win32":
+        return None
+    try:
+        distros = subprocess.run(
+            ["wsl", "-l", "-q"],
+            capture_output=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return None
+    if distros.returncode != 0:
+        return None
+    distro_output = distros.stdout or b""
+    if isinstance(distro_output, str):
+        distro_text = distro_output
+    elif b"\x00" in distro_output:
+        distro_text = distro_output.decode("utf-16le", errors="replace")
+    else:
+        distro_text = distro_output.decode(errors="replace")
+    distro_text = distro_text.replace("\r", "\n")
+    distro_names = [
+        line.strip()
+        for line in distro_text.splitlines()
+        if line.strip()
+    ]
+    for distro_name in distro_names:
+        try:
+            completed = subprocess.run(
+                [
+                    "wsl",
+                    "-d",
+                    distro_name,
+                    "bash",
+                    "-lc",
+                    (
+                        "bashrc=\\$(ls -1d "
+                        "/opt/openfoam*/etc/bashrc "
+                        "/mnt/wslg/distro/opt/openfoam*/etc/bashrc "
+                        "2>/dev/null | sort | tail -n 1); "
+                        "if [ -z \"\\$bashrc\" ]; then exit 1; fi; "
+                        "source \"\\$bashrc\" >/dev/null 2>&1; "
+                        "for exe in blockMesh snappyHexMesh checkMesh simpleFoam; do "
+                        "command -v \"\\$exe\" >/dev/null 2>&1 || exit 2; "
+                        "done; "
+                        f"printf 'distro=%s\\n' \"{distro_name}\"; "
+                        "printf 'bashrc=%s\\n' \"\\$bashrc\""
+                    ),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+            continue
+        if completed.returncode != 0:
+            continue
+        payload: dict[str, str] = {}
+        for line in (completed.stdout or "").splitlines():
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            payload[key.strip()] = value.strip()
+        if not payload.get("bashrc"):
+            continue
+        payload.setdefault("distro", distro_name)
+        return payload
+    return None
+
+
 class OpenFOAMAdapter:
     """Optional boundary for future high-fidelity CFD integration."""
 
@@ -67,15 +163,23 @@ class OpenFOAMAdapter:
             return True
         if _configured_bin_dir():
             return True
+        if _detect_wsl_openfoam():
+            return True
         return any(shutil.which(executable) for executable in self.EXECUTABLE_CANDIDATES)
 
     def boundary_summary(self) -> dict[str, bool | str]:
-        return {
+        summary = {
             "adapter": "openfoam",
             "available": self.is_available(),
             "used": False,
             "mode": "optional",
         }
+        wsl_info = _detect_wsl_openfoam() if not _configured_bin_dir() else None
+        if wsl_info:
+            summary["runtime_backend"] = "wsl"
+            summary["wsl_distro"] = wsl_info.get("distro", "unknown")
+            summary["wsl_bashrc"] = wsl_info.get("bashrc", "")
+        return summary
 
     def build_case(
         self,
@@ -83,7 +187,23 @@ class OpenFOAMAdapter:
         *,
         best_candidate_id: str,
         best_candidate_geometry_path: Path,
+        froude_number: float | None = None,
     ) -> dict[str, bool | str]:
+        """Materialise an OpenFOAM case tree around a candidate STL.
+
+        Parameters
+        ----------
+        case_dir, best_candidate_id, best_candidate_geometry_path:
+            Existing contract — see callers.
+        froude_number:
+            Optional Froude number. When ``None`` (default) the case is
+            written bit-for-bit the same as before (legacy 5.0 m/s inlet).
+            When provided, the inlet velocity in ``0/U`` is scaled to
+            ``U = froude_number * sqrt(g * lRef)`` where ``g`` is
+            ``_GRAVITY_ACCEL_M_S2`` and ``lRef`` is ``_DEFAULT_LREF_M``,
+            matching the ``lRef`` set in the ``forceCoeffs`` block of
+            ``_control_dict``.
+        """
         openfoam_case_dir = case_dir / "working" / "openfoam_case"
         tri_surface_dir = openfoam_case_dir / "constant" / "triSurface"
         system_dir = openfoam_case_dir / "system"
@@ -105,23 +225,30 @@ class OpenFOAMAdapter:
         (constant_dir / "transportProperties").write_text(self._transport_properties(), encoding="utf-8")
         (constant_dir / "turbulenceProperties").write_text(self._turbulence_properties(), encoding="utf-8")
         # Initial fields for simpleFoam (k-omega SST).
-        (zero_dir / "U").write_text(self._initial_U(), encoding="utf-8")
+        (zero_dir / "U").write_text(
+            self._initial_U(froude_number=froude_number),
+            encoding="utf-8",
+        )
         (zero_dir / "p").write_text(self._initial_p(), encoding="utf-8")
         (zero_dir / "k").write_text(self._initial_k(), encoding="utf-8")
         (zero_dir / "omega").write_text(self._initial_omega(), encoding="utf-8")
         (zero_dir / "nut").write_text(self._initial_nut(), encoding="utf-8")
 
-        manifest = {
-            "adapter": "openfoam",
-            "available": self.is_available(),
-            "used": False,
-            "mode": "optional",
-            "case_built": True,
-            "best_candidate_id": best_candidate_id,
-            "case_directory": str(openfoam_case_dir),
-            "geometry_path": str(target_stl),
-            "mesh_templates": ["blockMeshDict", "snappyHexMeshDict"],
-        }
+        manifest = self.boundary_summary()
+        manifest.update(
+            {
+                "case_built": True,
+                "best_candidate_id": best_candidate_id,
+                "case_directory": str(openfoam_case_dir),
+                "geometry_path": str(target_stl),
+                "mesh_templates": ["blockMeshDict", "snappyHexMeshDict"],
+            }
+        )
+        if froude_number is not None:
+            manifest["froude_number"] = float(froude_number)
+            manifest["inlet_velocity_m_s"] = float(
+                _velocity_for_froude(float(froude_number))
+            )
         (openfoam_case_dir / "openfoam_case_manifest.json").write_text(
             json.dumps(manifest, indent=2),
             encoding="utf-8",
@@ -158,7 +285,7 @@ class OpenFOAMAdapter:
             "    forceCoeffs\n"
             "    {\n"
             "        type            forceCoeffs;\n"
-            "        libs            (forces);\n"
+            "        libs            (\"libforces.so\");\n"
             "        writeControl    timeStep;\n"
             "        writeInterval   1;\n"
             "        patches         (hull);\n"
@@ -193,7 +320,31 @@ class OpenFOAMAdapter:
             "}\n"
         )
 
-    def _initial_U(self) -> str:
+    def _initial_U(self, *, froude_number: float | None = None) -> str:
+        # Default branch is byte-for-byte identical to the historical
+        # template so the 310 existing tests stay GREEN.
+        if froude_number is None:
+            return (
+                "FoamFile\n"
+                "{\n"
+                "    version     2.0;\n"
+                "    format      ascii;\n"
+                "    class       volVectorField;\n"
+                "    object      U;\n"
+                "}\n"
+                "dimensions      [0 1 -1 0 0 0 0];\n"
+                "internalField   uniform (5 0 0);\n"
+                "boundaryField\n"
+                "{\n"
+                "    inlet       { type fixedValue; value uniform (5 0 0); }\n"
+                "    outlet      { type inletOutlet; inletValue uniform (0 0 0); value uniform (5 0 0); }\n"
+                "    farField    { type slip; }\n"
+                "    hull        { type noSlip; }\n"
+                "}\n"
+            )
+        ux = _velocity_for_froude(float(froude_number))
+        triple = f"({ux:.10g} 0 0)"
+        zero_triple = "(0 0 0)"
         return (
             "FoamFile\n"
             "{\n"
@@ -203,11 +354,11 @@ class OpenFOAMAdapter:
             "    object      U;\n"
             "}\n"
             "dimensions      [0 1 -1 0 0 0 0];\n"
-            "internalField   uniform (5 0 0);\n"
+            f"internalField   uniform {triple};\n"
             "boundaryField\n"
             "{\n"
-            "    inlet       { type fixedValue; value uniform (5 0 0); }\n"
-            "    outlet      { type inletOutlet; inletValue uniform (0 0 0); value uniform (5 0 0); }\n"
+            f"    inlet       {{ type fixedValue; value uniform {triple}; }}\n"
+            f"    outlet      {{ type inletOutlet; inletValue uniform {zero_triple}; value uniform {triple}; }}\n"
             "    farField    { type slip; }\n"
             "    hull        { type noSlip; }\n"
             "}\n"
@@ -386,6 +537,7 @@ class OpenFOAMAdapter:
             "    best_candidate.stl\n"
             "    {\n"
             "        type triSurfaceMesh;\n"
+            "        file \"best_candidate.stl\";\n"
             "        name hull;\n"
             "    }\n"
             "}\n"
@@ -531,6 +683,16 @@ class OpenFOAMAdapter:
             "transportModel  Newtonian;\n"
             "nu              1e-06;\n"
         )
+
+
+def _velocity_for_froude(
+    froude_number: float, *, l_ref: float = _DEFAULT_LREF_M
+) -> float:
+    """Compute the inlet velocity matching ``froude_number`` at ``l_ref``.
+
+    ``Fr = U / sqrt(g * L)``  ->  ``U = Fr * sqrt(g * L)``.
+    """
+    return float(froude_number) * math.sqrt(_GRAVITY_ACCEL_M_S2 * float(l_ref))
 
 
 def detect_openfoam_available() -> bool:

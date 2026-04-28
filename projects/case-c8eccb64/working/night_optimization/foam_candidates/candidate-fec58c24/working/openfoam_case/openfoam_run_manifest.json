@@ -1,0 +1,15 @@
+{
+  "runner_status": "executed_failed",
+  "runner_reason": "solver_chain_failed_at_path_conversion",
+  "runner_recoverable": true,
+  "runner_case_directory": "C:\\Users\\\u0440\u0441\\Desktop\\bulbop2\\bulbai2\\projects\\case-c8eccb64\\working\\night_optimization\\foam_candidates\\candidate-fec58c24\\working\\openfoam_case",
+  "runtime_backend": "wsl",
+  "wsl_distro": "Ubuntu-22.04",
+  "wsl_bashrc": "/opt/openfoam13/etc/bashrc",
+  "status": "executed_failed",
+  "reason": "solver_chain_failed_at_path_conversion",
+  "is_recoverable": true,
+  "best_candidate_id": "candidate-fec58c24",
+  "executed_steps": [],
+  "high_fidelity_used": false
+}

@@ -1,0 +1,5 @@
+{"timestamp": "2026-04-24T05:20:36+00:00", "stage": "pipeline", "status": "started", "case_id": "case-38b7ec4d", "mode": "night_optimization"}
+{"timestamp": "2026-04-24T05:20:36+00:00", "stage": "prepare_geometry", "status": "started"}
+{"timestamp": "2026-04-24T05:20:40+00:00", "stage": "prepare_geometry", "status": "completed"}
+{"timestamp": "2026-04-24T05:20:40+00:00", "stage": "night_optimization", "status": "started"}
+{"timestamp": "2026-04-24T05:20:40+00:00", "stage": "high_gate", "status": "initialised", "backend": "surrogate", "reason": "openfoam_unavailable"}
